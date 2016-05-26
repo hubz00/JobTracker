@@ -9,26 +9,33 @@ import android.os.Bundle;
 import android.support.v7.app.AppCompatActivity;
 import android.view.Menu;
 import android.view.MenuItem;
+import android.view.View;
+import android.widget.Button;
+import android.widget.EditText;
 
 import com.estimote.sdk.Beacon;
 import com.estimote.sdk.BeaconManager;
 import com.estimote.sdk.Region;
 import com.estimote.sdk.SystemRequirementsChecker;
+import com.loopj.android.http.AsyncHttpClient;
+import com.loopj.android.http.AsyncHttpResponseHandler;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+
+import cz.msebera.android.httpclient.Header;
 
 public class MainActivity extends AppCompatActivity {
 
     private static final Map<String, List<String>> PLACES_BY_BEACONS;
     private String workState = null;
-    private static String kitchenMsg = "NIE PRACUJESZ!! JESTES W KUCHNI!";
-    private static String workMsg = "PRACUJESZ! SWIETNIE!";
-    private static String outOfBuildingMsg = "NIE PRACUJESZ!! WYSZEDLES Z BUDYNKU!";
-
+    private static String kitchenMsg = "kitchen";
+    private static String workMsg = "work";
+    private static String outOfBuildingMsg = "outofbuilding";
 
     static {
         Map<String, List<String>> placesByBeacons = new HashMap<>();
@@ -67,14 +74,23 @@ public class MainActivity extends AppCompatActivity {
         setContentView(R.layout.activity_main);
 
         beaconManager = new BeaconManager(this);
+        final EditText idText = (EditText) findViewById(R.id.workerId);
+        Button submit = (Button) findViewById(R.id.button);
+
+        submit.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                ((MyApplication) getApplicationContext()).setId(Integer.parseInt(idText.getText().toString()));
+            }
+        });
         beaconManager.setRangingListener(new BeaconManager.RangingListener() {
             @Override
             public void onBeaconsDiscovered(Region region, List<Beacon> list) {
-                if (!list.isEmpty()) {
+                if (!list.isEmpty() && ((MyApplication) getApplicationContext()).getId() != -1) {
                     Beacon nearestBeacon = list.get(0);
                     List<String> places = placesNearBeacon(nearestBeacon);
-                    if(!places.isEmpty()) {
-                        if(!places.get(0).equals(workState)) {
+                    if (!places.isEmpty()) {
+                        if (!places.get(0).equals(workState)) {
                             workState = places.get(0);
                             showNotification("Stan pracy", workState);
                         }
@@ -83,6 +99,24 @@ public class MainActivity extends AppCompatActivity {
             }
         });
         region = new Region("ranged region", null, null, null);
+    }
+
+    private void get(String state) {
+        AsyncHttpClient client = new AsyncHttpClient();
+        int diffInSeconds = (int) ((new Date().getTime() - ((MyApplication) getApplicationContext()).getLastCheckout().getTime())
+                / (1000));
+        final DeviceData deviceData = new DeviceData(((MyApplication) getApplicationContext()).getId(), state, diffInSeconds);
+        client.get("https://dweet.io/dweet/for/job_tracker_1?id=" + deviceData.getDeviceId() + "&location=" + deviceData.getLocation() + "&time_spent=" + deviceData.getTime_spent(), new AsyncHttpResponseHandler() {
+            @Override
+            public void onSuccess(int statusCode, Header[] headers, byte[] responseBody) {
+                ((MyApplication) getApplicationContext()).setLastCheckout(new Date());
+            }
+
+            @Override
+            public void onFailure(int statusCode, Header[] headers, byte[] responseBody, Throwable error) {
+            }
+        });
+
     }
 
     @Override
@@ -144,5 +178,6 @@ public class MainActivity extends AppCompatActivity {
         NotificationManager notificationManager =
                 (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
         notificationManager.notify(1, notification);
+        get(message);
     }
 }
