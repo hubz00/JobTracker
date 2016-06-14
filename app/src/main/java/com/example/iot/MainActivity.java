@@ -5,6 +5,7 @@ import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
+import android.content.res.AssetManager;
 import android.os.Bundle;
 import android.support.v7.app.AppCompatActivity;
 import android.view.Menu;
@@ -20,22 +21,26 @@ import com.estimote.sdk.SystemRequirementsChecker;
 import com.loopj.android.http.AsyncHttpClient;
 import com.loopj.android.http.AsyncHttpResponseHandler;
 
+import java.io.IOException;
+import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Properties;
 
 import cz.msebera.android.httpclient.Header;
 
 public class MainActivity extends AppCompatActivity {
 
     private static final Map<String, List<String>> PLACES_BY_BEACONS;
-    private String workState = null;
-    private static String kitchenMsg = "kitchen";
-    private static String workMsg = "work";
-    private static String outOfBuildingMsg = "outofbuilding";
+    private String workState = " ";
+    public static String kitchenMsg = "kitchen";
+    public static String workMsg = "work";
+    public static String outOfBuildingMsg = "outofbuilding";
+    private static String dweetKey;
 
     static {
         Map<String, List<String>> placesByBeacons = new HashMap<>();
@@ -72,10 +77,21 @@ public class MainActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
+        Properties props=new Properties();
+        AssetManager assetManager = getBaseContext().getAssets();
+        InputStream inputStream = null;
+        try {
+            inputStream = assetManager.open("dweet.properties");
+            props.load(inputStream);
+            dweetKey = props.getProperty("key");
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
 
         beaconManager = new BeaconManager(this);
         final EditText idText = (EditText) findViewById(R.id.workerId);
         Button submit = (Button) findViewById(R.id.button);
+        submit.setText("Submit ID");
 
         submit.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -91,8 +107,7 @@ public class MainActivity extends AppCompatActivity {
                     List<String> places = placesNearBeacon(nearestBeacon);
                     if (!places.isEmpty()) {
                         if (!places.get(0).equals(workState)) {
-                            workState = places.get(0);
-                            showNotification("Stan pracy", workState);
+                            showNotification("Stan pracy", places.get(0), workState);
                         }
                     }
                 }
@@ -101,21 +116,32 @@ public class MainActivity extends AppCompatActivity {
         region = new Region("ranged region", null, null, null);
     }
 
-    private void get(String state) {
+    private void get(String state, String previousState) {
         AsyncHttpClient client = new AsyncHttpClient();
         int diffInSeconds = (int) ((new Date().getTime() - ((MyApplication) getApplicationContext()).getLastCheckout().getTime())
                 / (1000));
-        final DeviceData deviceData = new DeviceData(((MyApplication) getApplicationContext()).getId(), state, diffInSeconds);
-        client.get("https://dweet.io/dweet/for/job_tracker_1?id=" + deviceData.getDeviceId() + "&location=" + deviceData.getLocation() + "&time_spent=" + deviceData.getTime_spent(), new AsyncHttpResponseHandler() {
-            @Override
-            public void onSuccess(int statusCode, Header[] headers, byte[] responseBody) {
-                ((MyApplication) getApplicationContext()).setLastCheckout(new Date());
-            }
+        final DeviceData deviceData = new DeviceData(((MyApplication) getApplicationContext()).getId(), previousState, state, diffInSeconds);
+        client.get("https://dweet.io/dweet/for/job_tracker_1?key=" +
+                        dweetKey +
+                        "&id=" + deviceData.getDeviceId() +
+                        "&locationbefore=" + deviceData.getLocationBefore() +
+                        "&locationafter=" + deviceData.getLocationAfter() +
+                        "&time_spent_kitchen=" + deviceData.getTimeSpentKitchen() +
+                        "&time_spent_outside=" + deviceData.getTimeSpentOutside() +
+                        "&time_spent_work=" + deviceData.getTimeSpentWork() +
+                        "&kitchen=" + deviceData.getKitchen() +
+                        "&left=" + deviceData.getLeft() +
+                        "&work=" + deviceData.getWork(),
+                new AsyncHttpResponseHandler() {
+                    @Override
+                    public void onSuccess(int statusCode, Header[] headers, byte[] responseBody) {
+                        ((MyApplication) getApplicationContext()).setLastCheckout(new Date());
+                    }
 
-            @Override
-            public void onFailure(int statusCode, Header[] headers, byte[] responseBody, Throwable error) {
-            }
-        });
+                    @Override
+                    public void onFailure(int statusCode, Header[] headers, byte[] responseBody, Throwable error) {
+                    }
+                });
 
     }
 
@@ -162,7 +188,8 @@ public class MainActivity extends AppCompatActivity {
         return super.onOptionsItemSelected(item);
     }
 
-    public void showNotification(String title, String message) {
+    public void showNotification(String title, String state, String previousState) {
+        workState = state;
         Intent notifyIntent = new Intent(this, MainActivity.class);
         notifyIntent.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
         PendingIntent pendingIntent = PendingIntent.getActivities(this, 0,
@@ -170,7 +197,7 @@ public class MainActivity extends AppCompatActivity {
         Notification notification = new Notification.Builder(this)
                 .setSmallIcon(android.R.drawable.ic_dialog_info)
                 .setContentTitle(title)
-                .setContentText(message)
+                .setContentText(workState)
                 .setAutoCancel(true)
                 .setContentIntent(pendingIntent)
                 .build();
@@ -178,6 +205,6 @@ public class MainActivity extends AppCompatActivity {
         NotificationManager notificationManager =
                 (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
         notificationManager.notify(1, notification);
-        get(message);
+        get(state, previousState);
     }
 }
